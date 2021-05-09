@@ -1,0 +1,68 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	// "go-project-layout/server/http"
+
+	"golang.org/x/sync/errgroup"
+)
+
+const addr = ":9527"
+
+func main() {
+	g, ctx := errgroup.WithContext(context.Background())
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, "just another http server...")
+	})
+	//使用默认路由创建 http server
+	svr := http.Server{
+		Addr:    addr,
+		Handler: http.DefaultServeMux,
+	}
+
+	// http server
+	g.Go(func() error {
+		fmt.Println("http")
+		go func() {
+			<-ctx.Done()
+			fmt.Println("http ctx done")
+			svr.Shutdown(context.Background())
+		}()
+		return svr.ListenAndServe()
+	})
+
+	// signal
+	g.Go(func() error {
+		exitSignals := []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT, syscall.SIGINT} // SIGTERM is POSIX specific
+		sig := make(chan os.Signal, len(exitSignals))
+		signal.Notify(sig, exitSignals...)
+		for {
+			fmt.Println("signal")
+			select {
+			case <-ctx.Done():
+				fmt.Println("signal ctx done")
+				return ctx.Err()
+			case <-sig:
+				return nil
+			}
+		}
+	})
+
+	g.Go(func() error {
+		fmt.Println("inject")
+		time.Sleep(time.Second)
+		fmt.Println("inject finish")
+		return errors.New("inject error")
+	})
+
+	err := g.Wait()
+	fmt.Println(err)
+}
